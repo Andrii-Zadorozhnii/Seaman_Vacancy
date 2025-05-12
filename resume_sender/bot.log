@@ -1,0 +1,20 @@
+2025-05-10 21:07:09,741 - __main__ - INFO - Starting bot polling...
+2025-05-10 21:07:09,741 - aiogram.dispatcher.dispatcher - INFO - Start polling.
+2025-05-10 21:07:26,485 - __main__ - INFO - User 1009961747 started the bot
+2025-05-10 21:07:32,736 - __main__ - INFO - User 1009961747 entered position: Chief Officer
+2025-05-10 21:07:47,381 - __main__ - INFO - User 1009961747 entered name: Andrii Zadorozhnii
+2025-05-10 21:07:52,188 - __main__ - INFO - User 1009961747 entered email: Zador746@gmail.com
+2025-05-10 21:08:01,735 - __main__ - INFO - User 1009961747 entered phone: 380631231233
+2025-05-10 21:08:15,369 - __main__ - INFO - User 1009961747 uploaded resume: temp_resume_1009961747.pdf
+2025-05-10 21:08:25,579 - __main__ - INFO - User 1009961747 uploaded CV: temp_cv_1009961747.pdf
+2025-05-10 21:08:25,656 - __main__ - INFO - Starting email sending for user 1009961747
+2025-05-10 21:08:25,656 - __main__ - INFO - Preparing to send emails for Andrii Zadorozhnii (Zador746@gmail.com) applying for Chief Officer
+2025-05-10 21:08:25,656 - __main__ - INFO - SendGrid client initialized
+2025-05-10 21:08:25,658 - __main__ - INFO - Connected to database
+2025-05-10 21:08:25,658 - __main__ - INFO - Preparing email for company #1: crew@goldroutemaritime.com
+2025-05-10 21:08:27,077 - __main__ - ERROR - Error sending email to <sendgrid.helpers.mail.to_email.To object at 0x1050ee650>: HTTP Error 403: Forbidden
+2025-05-10 21:08:27,158 - __main__ - INFO - Finished sending to 1 companies
+2025-05-10 21:08:27,238 - __main__ - INFO - Emails sent successfully for user 1009961747
+2025-05-10 21:38:32,671 - aiogram.dispatcher.dispatcher - WARNING - Polling is stopped.
+2025-05-10 21:38:32,672 - __main__ - INFO - Bot stopped
+2025-05-10 21:38:32,705 - aiogram.dispatcher.dispatcher - INFO - Stop polling...

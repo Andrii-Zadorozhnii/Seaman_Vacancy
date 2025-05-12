@@ -1,21 +1,27 @@
 import os
-import aiosqlite
-import sendgrid
 import base64
-from sendgrid.helpers.mail import Mail, Email, To, Content, Attachment, FileContent, FileName, FileType, Disposition
-from aiogram import Bot, Dispatcher, types, executor
-from aiogram.dispatcher import FSMContext
-from aiogram.dispatcher.filters.state import State, StatesGroup
-from aiogram.contrib.fsm_storage.memory import MemoryStorage
+import aiosqlite
+import tempfile
+import sendgrid
+from sendgrid.helpers.mail import (
+    Mail, Email, To, Content, Attachment, FileContent, FileName, FileType, Disposition
+)
+
+from aiogram import Bot, Dispatcher, Router, types
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import Message, FSInputFile
+from aiogram.filters import CommandStart
+from aiogram.fsm.context import FSMContext
+
 from config import BOT_TOKEN_RESUME, SENDGRID_APIKEY, EMAIL
 
-
-BOT_TOKEN = BOT_TOKEN_RESUME
-SENDGRID_API_KEY = SENDGRID_APIKEY
-SENDER_EMAIL = EMAIL
-
-bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher(bot, storage=MemoryStorage())
+# Создание бота, диспетчера и роутера
+bot = Bot(token=BOT_TOKEN_RESUME)
+storage = MemoryStorage()
+dp = Dispatcher(storage=storage)
+router = Router()
+dp.include_router(router)
 
 
 class ResumeForm(StatesGroup):
@@ -27,153 +33,152 @@ class ResumeForm(StatesGroup):
     cv = State()
 
 
-@dp.message_handler(commands=["start"])
-async def start_command(message: types.Message):
-    await message.answer("Welcome! Please enter the position you're applying for (e.g., Chief Officer):")
-    await ResumeForm.position.set()
+@router.message(CommandStart())
+async def start_command(message: Message, state: FSMContext):
+    print(f"Received start command from {message.from_user.id}")
+    await message.answer("Добро пожаловать! Введите позицию, на которую подаёте резюме:")
+    await state.set_state(ResumeForm.position)
 
 
-@dp.message_handler(state=ResumeForm.position)
-async def get_position(message: types.Message, state: FSMContext):
+@router.message(ResumeForm.position)
+async def get_position(message: Message, state: FSMContext):
+    print(f"Received position: {message.text}")
     await state.update_data(position=message.text)
-    await message.answer("Please enter your full name:")
-    await ResumeForm.name.set()
+    await message.answer("Введите ваше полное имя:")
+    await state.set_state(ResumeForm.name)
 
 
-@dp.message_handler(state=ResumeForm.name)
-async def get_name(message: types.Message, state: FSMContext):
+@router.message(ResumeForm.name)
+async def get_name(message: Message, state: FSMContext):
+    print(f"Received name: {message.text}")
     await state.update_data(name=message.text)
-    await message.answer("Please enter your email address:")
-    await ResumeForm.email.set()
+    await message.answer("Введите ваш email:")
+    await state.set_state(ResumeForm.email)
 
 
-@dp.message_handler(state=ResumeForm.email)
-async def get_email(message: types.Message, state: FSMContext):
+@router.message(ResumeForm.email)
+async def get_email(message: Message, state: FSMContext):
+    print(f"Received email: {message.text}")
     await state.update_data(email=message.text)
-    await message.answer("Please enter your phone number:")
-    await ResumeForm.phone.set()
+    await message.answer("Введите номер телефона:")
+    await state.set_state(ResumeForm.phone)
 
 
-@dp.message_handler(state=ResumeForm.phone)
-async def get_phone(message: types.Message, state: FSMContext):
+@router.message(ResumeForm.phone)
+async def get_phone(message: Message, state: FSMContext):
+    print(f"Received phone number: {message.text}")
     await state.update_data(phone=message.text)
-    await message.answer("Please upload your Resume (PDF):")
-    await ResumeForm.resume.set()
+    await message.answer("Загрузите ваше резюме (PDF):")
+    await state.set_state(ResumeForm.resume)
 
 
-@dp.message_handler(content_types=types.ContentType.DOCUMENT, state=ResumeForm.resume)
-async def get_resume(message: types.Message, state: FSMContext):
-    resume_file = await message.document.download()
-    await state.update_data(resume_path=resume_file.name)
-    await message.answer("Please upload your CV (PDF):")
-    await ResumeForm.cv.set()
+@router.message(ResumeForm.resume)
+async def get_resume(message: Message, state: FSMContext):
+    print("Received resume file")
+    if not message.document or message.document.mime_type != "application/pdf":
+        await message.answer("Пожалуйста, загрузите именно PDF-файл.")
+        return
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp:
+        await message.bot.download(message.document.file_id, destination=temp)
+        resume_path = temp.name
+    print(f"Resume saved to {resume_path}")
+
+    await state.update_data(resume_path=resume_path)
+    await message.answer("Загрузите CV (PDF):")
+    await state.set_state(ResumeForm.cv)
 
 
-@dp.message_handler(content_types=types.ContentType.DOCUMENT, state=ResumeForm.cv)
-async def get_cv(message: types.Message, state: FSMContext):
-    cv_file = await message.document.download()
-    await state.update_data(cv_path=cv_file.name)
+@router.message(ResumeForm.cv)
+async def get_cv(message: Message, state: FSMContext):
+    print("Received CV file")
+    if not message.document or message.document.mime_type != "application/pdf":
+        await message.answer("Пожалуйста, загрузите именно PDF-файл.")
+        return
 
+    if message.document.file_size > 5 * 1024 * 1024:
+        await message.answer("Файл слишком большой. Максимум — 5 МБ.")
+        return
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp:
+        await message.bot.download(message.document.file_id, destination=temp)
+        cv_path = temp.name
+    print(f"CV saved to {cv_path}")
+
+    await state.update_data(cv_path=cv_path)
     user_data = await state.get_data()
-    await message.answer("Sending emails now... Please wait.")
+
+    await message.answer("Отправка писем... Пожалуйста, подождите.")
+    print("Sending emails...")
 
     await send_bulk_emails(user_data, message)
 
-    await message.answer("All emails sent successfully.")
-    await state.finish()
+    os.remove(user_data["resume_path"])
+    os.remove(cv_path)
+
+    print(f"Removed files: {user_data['resume_path']} and {cv_path}")
+    await message.answer("Резюме успешно разосланы всем компаниям.")
+    await state.clear()
 
 
-async def send_bulk_emails(data, message):
-    position = data["position"]
-    resume_path = data["resume_path"]
-    cv_path = data["cv_path"]
-    user_name = data["name"]
-    user_email = data["email"]
-    user_phone = data["phone"]
-    # Добавьте в начало кода
-    print(f"Using sender: {SENDER_EMAIL}, API key: {SENDGRID_API_KEY[:5]}...")
-    print("Preparing to send emails...")
-    print(f"Position: {position}")
-    print(f"Resume path: {resume_path}")
-    print(f"CV path: {cv_path}")
-    print(f"User name: {user_name}")
-    print(f"User email: {user_email}")
-    print(f"User phone: {user_phone}")
+async def send_bulk_emails(data: dict, message: Message):
+    print("Start sending bulk emails")
+    sg = sendgrid.SendGridAPIClient(api_key=SENDGRID_APIKEY)
 
     html = f"""
-    <html>
-        <body>
-            <p>Dear Crewing Manager,<br><br>
-            I am writing to express my interest in the <strong>{position}</strong> position onboard your good vessel.<br>
-            Please find attached my Resume and CV.<br><br>
-
-            My details are as follows:<br>
-            <strong>Name:</strong> {user_name}<br>
-            <strong>Email:</strong> {user_email}<br>
-            <strong>Phone:</strong> {user_phone}<br><br>
-
-            Best regards,<br>
-            {user_name}
-            </p>
-        </body>
-    </html>
+    <p>Dear Crewing Manager,<br><br>
+    I am applying for the <strong>{data['position']}</strong> position onboard your vessel.<br>
+    Please find attached my Resume and CV.<br><br>
+    <strong>Name:</strong> {data['name']}<br>
+    <strong>Email:</strong> {data['email']}<br>
+    <strong>Phone:</strong> {data['phone']}<br><br>
+    Best regards,<br>
+    {data['name']}
+    </p>
     """
 
-    try:
-        sg = sendgrid.SendGridAPIClient(api_key=SENDGRID_API_KEY)
-        print("SendGrid client initialized.")
+    def create_attachment(file_path: str, name: str) -> Attachment:
+        with open(file_path, "rb") as f:
+            encoded = base64.b64encode(f.read()).decode()
+        return Attachment(
+            FileContent(encoded),
+            FileName(name),
+            FileType("application/pdf"),
+            Disposition("attachment")
+        )
 
-        async with aiosqlite.connect("crewing_2.db") as db:
-            print("Connected to crewing_2.db database.")
-            async with db.execute("SELECT email FROM companies") as cursor:
-                print("Executing SQL query to fetch company emails...")
-                async for row in cursor:
-                    print("Fetched a new row from the database.")
-                    to_email = row[0]
-                    print(f"Sending to: {to_email}")
-
-                    # Compose the email
-                    from_email = Email(SENDER_EMAIL)
-                    to_email = To(to_email)
-                    subject = f"Application for {position} position"
-                    content = Content("text/html", html)
-
-                    def create_attachment(file_path: str, name: str) -> Attachment:
-                        with open(file_path, "rb") as f:
-                            data = f.read()
-                        encoded_file = base64.b64encode(data).decode()
-                        return Attachment(
-                            FileContent(encoded_file),
-                            FileName(name),
-                            FileType("application/pdf"),
-                            Disposition("attachment")
-                        )
-
-                    resume_attachment = create_attachment(resume_path, "Resume.pdf")
-                    cv_attachment = create_attachment(cv_path, "CV.pdf")
-                    print("Attachments created successfully.")
-
-                    mail = Mail(from_email, to_email, subject, content)
-                    mail.add_attachment(resume_attachment)
-                    mail.add_attachment(cv_attachment)
-
-                    # Send email
+    async with aiosqlite.connect("crewing_2.db") as db:
+        async with db.execute("SELECT email FROM companies") as cursor:
+            async for row in cursor:
+                to_email = row[0]
+                try:
+                    mail = Mail(
+                        from_email=Email(EMAIL),
+                        to_emails=To(to_email),
+                        subject=f"Application for {data['position']} position",
+                        html_content=Content("text/html", html)
+                    )
+                    mail.add_attachment(create_attachment(data["resume_path"], "Resume.pdf"))
+                    mail.add_attachment(create_attachment(data["cv_path"], "CV.pdf"))
                     response = sg.send(mail)
-                    print(f"SendGrid response status: {response.status_code}")
 
-                    # Logging to confirm email sent
                     if response.status_code == 202:
-                        await message.answer(f"Email sent to {to_email.email}")
+                        print(f"Email sent to: {to_email}")
+                        await message.answer(f"Письмо отправлено: {to_email}")
                     else:
-                        await message.answer(f"Failed to send email to {to_email}")
+                        print(f"Error sending email to {to_email}: {response.status_code}")
+                        await message.answer(f"Ошибка при отправке на {to_email}: {response.status_code}")
+                except Exception as e:
+                    print(f"Error for {to_email}: {str(e)}")
+                    await message.answer(f"Ошибка для {to_email}: {str(e)}")
 
-    except Exception as e:
-        print(f"Exception occurred: {str(e)}")
-        await message.answer(f"Error: {str(e)}")
 
-async def main():
-    await dp.start_polling()
-
+# Точка входа
 if __name__ == "__main__":
     import asyncio
+
+    async def main():
+        print("Bot is starting...")
+        await dp.start_polling(bot)
+
     asyncio.run(main())
