@@ -1,0 +1,40 @@
+Metadata-Version: 2.4
+Name: aiogram.contrib
+Version: 1.1.4
+Summary: A collection of useless (or maybe not) junk for aiogram
+Project-URL: Repository, https://github.com/wakaree/aiogram-contrib
+Author-email: wakaree <nullmatawasoradesu@gmail.com>
+Maintainer-email: wakaree <nullmatawasoradesu@gmail.com>
+License-Expression: MIT
+License-File: LICENSE
+Keywords: aiogram,bot,telegram
+Classifier: Development Status :: 5 - Production/Stable
+Classifier: Environment :: Console
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Topic :: Software Development :: Libraries :: Python Modules
+Classifier: Typing :: Typed
+Requires-Python: >=3.9
+Requires-Dist: aiogram<4.0,>=3.0
+Provides-Extra: dev
+Requires-Dist: black~=24.8.0; extra == 'dev'
+Requires-Dist: mypy~=1.11.1; extra == 'dev'
+Requires-Dist: pre-commit~=3.8.0; extra == 'dev'
+Requires-Dist: ruff~=0.6.1; extra == 'dev'
+Description-Content-Type: text/x-rst
+
+
+###############
+aiogram-contrib
+###############
+
+Installation
+------------
+
+..  code-block:: bash
+
+    pip install -U aiogram-contrib

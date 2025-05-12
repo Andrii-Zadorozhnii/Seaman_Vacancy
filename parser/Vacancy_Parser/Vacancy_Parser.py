@@ -11,11 +11,8 @@ from config import BASE_URL as BASE_URL_VACANCY, DATABASE_NAME as DB
 # Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('vacancy_parser.log'),
-        logging.StreamHandler()
-    ]
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[logging.FileHandler("vacancy_parser.log"), logging.StreamHandler()],
 )
 logger = logging.getLogger(__name__)
 
@@ -29,16 +26,19 @@ class VacancyParser:
     def __init__(self):
         self.conn = self.init_db()
         self.session = requests.Session()
-        self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        })
+        self.session.headers.update(
+            {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+            }
+        )
 
     def init_db(self) -> sqlite3.Connection:
         conn = sqlite3.connect(DATABASE_NAME)
         conn.row_factory = sqlite3.Row
 
         with conn:
-            conn.execute('''
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS companies (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     name TEXT NOT NULL,
@@ -52,9 +52,11 @@ class VacancyParser:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(name, url)
                 )
-            ''')
+            """
+            )
 
-            conn.execute('''
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS vacancies (
                     id INTEGER PRIMARY KEY,
                     title TEXT,
@@ -87,7 +89,8 @@ class VacancyParser:
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY(company_id) REFERENCES companies(id) ON DELETE SET NULL
                 )
-            ''')
+            """
+            )
 
         return conn
 
@@ -97,13 +100,12 @@ class VacancyParser:
             return None
 
         try:
-            normalized_name = ' '.join(company_name.strip().split()).lower()
+            normalized_name = " ".join(company_name.strip().split()).lower()
 
             with self.conn:
                 cursor = self.conn.cursor()
                 cursor.execute(
-                    "SELECT id FROM companies WHERE LOWER(name) = ?",
-                    (normalized_name,)
+                    "SELECT id FROM companies WHERE LOWER(name) = ?", (normalized_name,)
                 )
                 result = cursor.fetchone()
 
@@ -112,7 +114,7 @@ class VacancyParser:
 
                 cursor.execute(
                     "INSERT INTO companies (name) VALUES (?)",
-                    (company_name.capitalize(),)
+                    (company_name.capitalize(),),
                 )
                 return cursor.lastrowid
 
@@ -130,8 +132,7 @@ class VacancyParser:
                 values.append(company_id)
 
                 cursor.execute(
-                    f"UPDATE companies SET {set_clause} WHERE id = ?",
-                    values
+                    f"UPDATE companies SET {set_clause} WHERE id = ?", values
                 )
                 return True
         except sqlite3.Error as e:
@@ -140,7 +141,7 @@ class VacancyParser:
 
     def fetch_vacancy(self, vacancy_id: int) -> Optional[dict]:
         """Получаем данные вакансии с сайта"""
-        url = f'{BASE_URL}/en/vacancy/{vacancy_id}'
+        url = f"{BASE_URL}/en/vacancy/{vacancy_id}"
         logger.info(f"Запрос вакансии ID: {vacancy_id}")
 
         normalized_mapping = {
@@ -164,38 +165,43 @@ class VacancyParser:
             "Recommended e-mail subject": "email_subject",
             "Relevant manager name": "manager",
             "Employer": "agency",
-            "Website": "website"
+            "Website": "website",
         }
 
         try:
             response = self.session.get(url)
             response.raise_for_status()
-            soup = BeautifulSoup(response.text, 'html.parser')
-            block = soup.find('div', class_='vacancy-full-content')
+            soup = BeautifulSoup(response.text, "html.parser")
+            block = soup.find("div", class_="vacancy-full-content")
 
             if not block:
                 logger.warning(f"Вакансия {vacancy_id} не найдена (отсутствует блок)")
                 return None
 
-            data = {'id': vacancy_id}
+            data = {"id": vacancy_id}
 
             # Заголовок вакансии
-            title_tag = block.find('h1')
-            data['title'] = (
+            title_tag = block.find("h1")
+            data["title"] = (
                 title_tag.get_text(strip=True).replace("Vacancy", "", 1).strip()
-                if title_tag else None
+                if title_tag
+                else None
             )
 
             # Дата публикации и просмотры
-            date_pubs = block.find_all('div', class_='datepub')
+            date_pubs = block.find_all("div", class_="datepub")
             if date_pubs:
-                data['published'] = date_pubs[0].get_text(strip=True).replace('Posted:', '').strip()
+                data["published"] = (
+                    date_pubs[0].get_text(strip=True).replace("Posted:", "").strip()
+                )
                 if len(date_pubs) > 1:
-                    data['views'] = date_pubs[1].get_text(strip=True).replace('Views:', '').strip()
+                    data["views"] = (
+                        date_pubs[1].get_text(strip=True).replace("Views:", "").strip()
+                    )
 
             # Основные поля вакансии
-            for col in block.find_all('div', class_='colmn'):
-                span = col.find('span')
+            for col in block.find_all("div", class_="colmn"):
+                span = col.find("span")
                 if not span:
                     continue
 
@@ -207,44 +213,56 @@ class VacancyParser:
 
                     # Специальная обработка для разных полей
                     if normalized_key == "Employer":
-                        agency = col.find('a')
-                        data[db_field] = agency.get_text(strip=True) if agency else col.get_text().replace(raw_key,
-                                                                                                           '').strip()
+                        agency = col.find("a")
+                        data[db_field] = (
+                            agency.get_text(strip=True)
+                            if agency
+                            else col.get_text().replace(raw_key, "").strip()
+                        )
                     elif normalized_key == "Contact e-mail":
-                        email = col.find('a')
-                        data[db_field] = email.get_text(strip=True) if email else col.get_text().replace(raw_key,
-                                                                                                         '').strip()
+                        email = col.find("a")
+                        data[db_field] = (
+                            email.get_text(strip=True)
+                            if email
+                            else col.get_text().replace(raw_key, "").strip()
+                        )
                     elif normalized_key == "Website":
-                        website = col.find('a')
-                        if website and website.has_attr('href'):
-                            data[db_field] = website['href'].strip()
+                        website = col.find("a")
+                        if website and website.has_attr("href"):
+                            data[db_field] = website["href"].strip()
                         else:
-                            text = col.get_text().replace(raw_key, '').strip()
-                            data[db_field] = text if text and text != '—' else None
+                            text = col.get_text().replace(raw_key, "").strip()
+                            data[db_field] = text if text and text != "—" else None
                     else:
-                        data[db_field] = col.get_text().replace(raw_key, '').strip()
+                        data[db_field] = col.get_text().replace(raw_key, "").strip()
 
             # Зарплата
-            salary_block = block.find('div', class_='priceBig')
+            salary_block = block.find("div", class_="priceBig")
             if salary_block:
-                salary = salary_block.find('strong')
+                salary = salary_block.find("strong")
                 if salary:
-                    data['salary'] = salary.get_text(strip=True)
+                    data["salary"] = salary.get_text(strip=True)
 
             # Дополнительная информация
-            add_info_tag = block.find('strong', class_='site_subtitle', string="Additional info:")
+            add_info_tag = block.find(
+                "strong", class_="site_subtitle", string="Additional info:"
+            )
             if add_info_tag:
                 info_text = []
                 next_elem = add_info_tag.next_sibling
-                while next_elem and not (next_elem.name == 'hr' and 'hr2' in next_elem.get('class', [])):
+                while next_elem and not (
+                    next_elem.name == "hr" and "hr2" in next_elem.get("class", [])
+                ):
                     if isinstance(next_elem, str):
                         info_text.append(next_elem.strip())
-                    elif next_elem.name == 'br':
-                        info_text.append('\n')
-                    elif hasattr(next_elem, 'get_text'):
+                    elif next_elem.name == "br":
+                        info_text.append("\n")
+                    elif hasattr(next_elem, "get_text"):
                         info_text.append(next_elem.get_text(strip=True))
                     next_elem = next_elem.next_sibling
-                data['additional_info'] = ' '.join([line for line in info_text if line.strip()]).strip()
+                data["additional_info"] = " ".join(
+                    [line for line in info_text if line.strip()]
+                ).strip()
             logger.debug(f"Raw website data: {data.get('website')}")
             logger.debug(f"Данные вакансии {vacancy_id}: {data}")
             return data
@@ -255,65 +273,106 @@ class VacancyParser:
 
     def save_vacancy(self, data: dict) -> bool:
         """Сохраняем вакансию в базу данных"""
-        if not data or 'id' not in data:
+        if not data or "id" not in data:
             logger.error("Нет данных или ID для сохранения")
             return False
 
         try:
             # Получаем или создаем компанию
             company_id = None
-            if data.get('agency'):
-                company_id = self.get_or_create_company(data['agency'])
-                if company_id and data.get('website'):
-                    # Нормализация website
-                    website = data['website'].strip()
-                    if website and not website.startswith(('http://', 'https://')):
-                        website = f'http://{website}'
-
+            if data.get("agency"):
+                company_id = self.get_or_create_company(data["agency"])
+                if company_id and data.get("website"):
+                    website = data["website"].strip()
+                    if website and not website.startswith(("http://", "https://")):
+                        website = f"http://{website}"
                     self.update_company_info(company_id, website=website)
-                    data['website'] = website  # Обновляем в данных вакансии
 
-            # Подготовка данных для вставки
+            # Подготовка данных для вставки (только существующие колонки)
             columns = [
-                'id', 'title', 'published', 'join_date', 'contract_length',
-                'vessel_type', 'vessel_name', 'built_year', 'dwt',
-                'engine_type', 'engine_power', 'crew', 'english_level',
-                'age_limit', 'visa_required', 'salary', 'phone', 'email',
-                'manager', 'additional_info', 'experience', 'agency', 'website', 'company_id'
+                "id",
+                "title",
+                "published",
+                "join_date",
+                "contract_length",
+                "vessel_type",
+                "vessel_name",
+                "built_year",
+                "dwt",
+                "engine_type",
+                "engine_power",
+                "crew",
+                "english_level",
+                "age_limit",
+                "visa_required",
+                "salary",
+                "phone",
+                "email",
+                "manager",
+                "additional_info",
+                "experience",
+                "agency",
+                "website",
             ]
+
+            # Добавляем company_id в данные, если оно есть
+            if company_id is not None:
+                columns.append("company_id")
+                data["company_id"] = company_id
 
             values = [data.get(col) for col in columns]
 
-            # Удаляем None значения для полей, которые не могут быть NULL
-            for i, col in enumerate(columns):
-                if col in ['id', 'title', 'published'] and values[i] is None:
-                    logger.error(f"Обязательное поле {col} отсутствует")
-                    return False
-
             with self.conn:
                 cursor = self.conn.cursor()
+                placeholders = ",".join(["?"] * len(columns))
 
-                # Создаем строку с плейсхолдерами
-                placeholders = ','.join(['?'] * len(columns))
+                # Проверяем, есть ли company_id в таблице
+                cursor.execute("PRAGMA table_info(vacancies)")
+                table_columns = [col[1] for col in cursor.fetchall()]
 
-                # Создаем строку SET для обновления
-                update_set = ','.join([f"{col}=excluded.{col}" for col in columns if col != 'id'])
-
-                cursor.execute(
-                    f'''INSERT INTO vacancies({','.join(columns)})
+                if "company_id" in table_columns:
+                    update_set = ",".join(
+                        [f"{col}=excluded.{col}" for col in columns if col != "id"]
+                    )
+                    query = f"""
+                        INSERT INTO vacancies({','.join(columns)})
                         VALUES ({placeholders})
-                        ON CONFLICT(id) DO UPDATE SET {update_set}''',
-                    values
-                )
+                        ON CONFLICT(id) DO UPDATE SET {update_set}
+                    """
+                else:
+                    # Если колонки company_id нет, сохраняем без нее
+                    logger.warning("Колонка company_id отсутствует в таблице vacancies")
+                    update_set = ",".join(
+                        [
+                            f"{col}=excluded.{col}"
+                            for col in columns
+                            if col != "id" and col != "company_id"
+                        ]
+                    )
+                    query = f"""
+                        INSERT INTO vacancies({','.join(col for col in columns if col != 'company_id')})
+                        VALUES ({','.join(['?'] * (len(columns) - 1))})
+                        ON CONFLICT(id) DO UPDATE SET {update_set}
+                    """
+                    values = [
+                        v for v, col in zip(values, columns) if col != "company_id"
+                    ]
 
-                logger.info(f"Вакансия {data['id']} сохранена. Website: {data.get('website')}")
+                cursor.execute(query, values)
+                logger.info(
+                    f"Вакансия {data['id']} сохранена. Company ID: {company_id}"
+                )
                 return True
 
         except sqlite3.Error as e:
-            logger.error(f"Ошибка SQL при сохранении вакансии {data.get('id')}: {str(e)}")
+            logger.error(
+                f"Ошибка SQL при сохранении вакансии {data.get('id')}: {str(e)}"
+            )
             return False
         except Exception as e:
-            logger.error(f"Неожиданная ошибка при сохранении {data.get('id')}: {str(e)}")
+            logger.error(
+                f"Неожиданная ошибка при сохранении {data.get('id')}: {str(e)}"
+            )
             return False
 
     def get_last_vacancy_id(self) -> int:
@@ -334,21 +393,27 @@ class VacancyParser:
             data = self.fetch_vacancy(vacancy_id)
             if not data:
                 if retry_count < MAX_RETRIES:
-                    logger.warning(f"Повторная попытка {retry_count + 1} для вакансии {vacancy_id}")
+                    logger.warning(
+                        f"Повторная попытка {retry_count + 1} для вакансии {vacancy_id}"
+                    )
                     sleep(REQUEST_DELAY * (retry_count + 1))
                     return self.process_vacancy(vacancy_id, retry_count + 1)
                 return False
 
             success = self.save_vacancy(data)
             if not success and retry_count < MAX_RETRIES:
-                logger.warning(f"Повторная попытка сохранения {retry_count + 1} для вакансии {vacancy_id}")
+                logger.warning(
+                    f"Повторная попытка сохранения {retry_count + 1} для вакансии {vacancy_id}"
+                )
                 sleep(REQUEST_DELAY * (retry_count + 1))
                 return self.process_vacancy(vacancy_id, retry_count + 1)
 
             return success
 
         except Exception as e:
-            logger.error(f"Критическая ошибка обработки вакансии {vacancy_id}: {str(e)}")
+            logger.error(
+                f"Критическая ошибка обработки вакансии {vacancy_id}: {str(e)}"
+            )
             return False
 
     def run(self, start_id: Optional[int] = None, end_id: Optional[int] = None):
