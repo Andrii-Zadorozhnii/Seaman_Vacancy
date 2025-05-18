@@ -101,6 +101,9 @@ class VacancyBot:
         self.dp.message(lambda msg: msg.text == "⏹ Остановить поиск")(
             self.stop_parsing_button
         )
+        self.dp.callback_query(lambda c: c.data.startswith("hashtag_"))(
+            self.hashtag_callback
+        )
 
     async def create_main_keyboard(self) -> ReplyKeyboardMarkup:
         """Create main reply keyboard with buttons"""
@@ -124,7 +127,7 @@ class VacancyBot:
             keyboard = await self.create_main_keyboard()
             await message.answer(
                 "🛳️ <b>Maritime Vacancy Bot</b>\n\n"
-                "I can fetch and post maritime job vacancies from ukrcrewing.com.ua\n\n"
+                "I can fetch and post maritime job vacancies\n\n"
                 "Use the buttons below to interact with the bot:",
                 reply_markup=keyboard,
             )
@@ -142,6 +145,73 @@ class VacancyBot:
             "You can click on any vacancy to see full details!"
         )
         await message.answer(help_text, reply_markup=keyboard)
+
+    def search_vacancies_by_hashtag(self, hashtag: str) -> list[dict]:
+        """Search vacancies by hashtag (position, vessel type or agency)"""
+        try:
+            with sqlite3.connect("crewing.db") as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+
+                # Search in title (position)
+                cursor.execute(
+                    "SELECT * FROM vacancies WHERE title LIKE ? ORDER BY published DESC LIMIT 20",
+                    (f"%{hashtag.replace('_', ' ')}%",),
+                )
+                title_results = [dict(row) for row in cursor.fetchall()]
+
+                # Search in vessel type
+                cursor.execute(
+                    "SELECT * FROM vacancies WHERE vessel_type LIKE ? ORDER BY published DESC LIMIT 20",
+                    (f"%{hashtag.replace('_', ' ')}%",),
+                )
+                vessel_results = [dict(row) for row in cursor.fetchall()]
+
+                # Search in agency
+                cursor.execute(
+                    "SELECT * FROM vacancies WHERE agency LIKE ? ORDER BY published DESC LIMIT 20",
+                    (f"%{hashtag.replace('_', ' ')}%",),
+                )
+                agency_results = [dict(row) for row in cursor.fetchall()]
+
+                # Combine and deduplicate results
+                all_results = title_results + vessel_results + agency_results
+                seen_ids = set()
+                unique_results = []
+
+                for vac in all_results:
+                    if vac["id"] not in seen_ids:
+                        seen_ids.add(vac["id"])
+                        unique_results.append(vac)
+
+                return unique_results
+
+        except sqlite3.Error as e:
+            logger.error(f"Database error in search_vacancies_by_hashtag: {str(e)}")
+            return []
+
+    async def hashtag_callback(self, callback: types.CallbackQuery):
+        """Handle hashtag button clicks"""
+        hashtag = callback.data.split("_")[1]
+        vacancies = self.search_vacancies_by_hashtag(hashtag)
+
+        if not vacancies:
+            await callback.answer(f"No vacancies found for #{hashtag}", show_alert=True)
+            return
+
+        builder = InlineKeyboardBuilder()
+        for vac in vacancies[:5]:  # Show first 5 results
+            builder.row(
+                InlineKeyboardButton(
+                    text=f"{vac['title']} ({vac['published']})",
+                    callback_data=f"vacancy_{vac['id']}",
+                )
+            )
+
+        await callback.message.answer(
+            f"🔍 Vacancies for #{hashtag}:", reply_markup=builder.as_markup()
+        )
+        await callback.answer()
 
     async def admin_parse(self, message: types.Message):
         """Admin-only parse command"""
@@ -284,7 +354,7 @@ class VacancyBot:
             ),
             InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_settings"),
         )
-        builder.adjust(2, 1)
+        builder.adjust(1, 1, 1)
 
         await message.answer(
             f"⚙️ <b>Настройки парсинга</b>\n\n"
@@ -428,23 +498,31 @@ class VacancyBot:
 
         try:
             with sqlite3.connect("crewing.db") as conn:
+                conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
 
+                # Get total vacancies count
                 cursor.execute("SELECT COUNT(*) FROM vacancies")
                 total_vacancies = cursor.fetchone()[0]
 
+                # Get total companies count
                 cursor.execute("SELECT COUNT(DISTINCT agency) FROM vacancies")
                 total_companies = cursor.fetchone()[0]
 
+                # Get recent vacancies count (last 7 days)
+                one_week_ago = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
                 cursor.execute(
                     "SELECT COUNT(*) FROM vacancies WHERE published >= ?",
-                    (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d"),
+                    (
+                        one_week_ago,
+                    ),  # Обратите внимание на запятую - создаем кортеж с одним элементом
                 )
                 recent_vacancies = cursor.fetchone()[0]
 
+                # Get top vessel types
                 cursor.execute(
                     "SELECT vessel_type, COUNT(*) as count FROM vacancies "
-                    "WHERE vessel_type IS NOT NULL "
+                    "WHERE vessel_type IS NOT NULL AND vessel_type != '' "
                     "GROUP BY vessel_type ORDER BY count DESC LIMIT 5"
                 )
                 top_vessels = cursor.fetchall()
@@ -465,7 +543,10 @@ class VacancyBot:
                 )
 
         except sqlite3.Error as e:
-            await message.answer(f"⚠️ Database error: {str(e)}")
+            logger.error(f"Database error in stats_button: {str(e)}")
+            await message.answer(
+                "⚠️ Error retrieving statistics. Please try again later."
+            )
 
     async def vacancy_callback(self, callback: types.CallbackQuery):
         """Handle vacancy details callback"""
@@ -481,13 +562,8 @@ class VacancyBot:
         builder = InlineKeyboardBuilder()
         if vacancy.get("phone") or vacancy.get("email"):
             if vacancy.get("phone"):
-                # Clean phone number from extra characters
                 phone = "".join(c for c in vacancy["phone"] if c.isdigit() or c == "+")
-                builder.add(
-                    InlineKeyboardButton(
-                        text="📞 Call", url=f"tel:{phone}"  # Use cleaned number
-                    )
-                )
+                builder.add(InlineKeyboardButton(text="📞 Call", url=f"tel:{phone}"))
             if vacancy.get("email"):
                 builder.add(
                     InlineKeyboardButton(
@@ -502,22 +578,43 @@ class VacancyBot:
             )
         except Exception as e:
             logger.error(f"Error sending vacancy details: {str(e)}")
-            await callback.message.answer(
-                text, reply_markup=None  # Send without buttons in case of error
-            )
+            await callback.message.answer(text, reply_markup=None)
 
         await callback.answer()
 
     async def post_vacancy(self, vacancy_id: int):
-        """Post vacancy to the group"""
+        """Post vacancy to the group with hashtag buttons"""
         vacancy = self.get_vacancy(vacancy_id)
         if not vacancy:
             return False
 
         text = self.format_vacancy_post(vacancy)
 
+        # Create buttons for hashtags
+        builder = InlineKeyboardBuilder()
+        hashtags = []
+
+        if vacancy.get("title"):
+            position = vacancy["title"].split(",")[0].split("(")[0].strip()
+            hashtags.append(position.replace(" ", "_"))
+        if vacancy.get("vessel_type"):
+            hashtags.append(vacancy["vessel_type"].replace(" ", "_"))
+        if vacancy.get("agency"):
+            agency = vacancy["agency"].split()[0].strip()
+            hashtags.append(agency.replace(" ", "_"))
+
+        # Add buttons for each hashtag (each in separate row)
+        # for tag in hashtags:
+        #     builder.row(
+        #         InlineKeyboardButton(text=f"#{tag}", callback_data=f"hashtag_{tag}")
+        #     )
+
         try:
-            await self.bot.send_message(chat_id=self.group_id, text=text)
+            await self.bot.send_message(
+                chat_id=self.group_id,
+                text=text,
+                reply_markup=builder.as_markup() if builder.buttons else None,
+            )
             return True
         except Exception as e:
             logger.error(f"Error posting vacancy {vacancy_id}: {str(e)}")
@@ -548,6 +645,10 @@ class VacancyBot:
         if safe_get("sailing_area") != "—":
             lines.append("🌍 <b>Регион плавания:</b> " + safe_get("sailing_area"))
         lines.append("")
+
+
+
+        
 
         # Vessel info
         vessel_info = []
@@ -666,6 +767,9 @@ class VacancyBot:
             lines.append(safe_get("additional_info"))
             lines.append("")
 
+        lines.append(
+            "При нажати на # ↙️, вы можете посмотреть все вакансии по должности"
+        )
         # Hashtags for search
         hashtags = []
         if safe_get("title") != "—":

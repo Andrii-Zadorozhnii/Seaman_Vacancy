@@ -4,7 +4,15 @@ import aiosqlite
 import tempfile
 import sendgrid
 from sendgrid.helpers.mail import (
-    Mail, Email, To, Content, Attachment, FileContent, FileName, FileType, Disposition
+    Mail,
+    Email,
+    To,
+    Content,
+    Attachment,
+    FileContent,
+    FileName,
+    FileType,
+    Disposition,
 )
 
 from aiogram import Bot, Dispatcher, Router, types
@@ -36,7 +44,10 @@ class ResumeForm(StatesGroup):
 @router.message(CommandStart())
 async def start_command(message: Message, state: FSMContext):
     print(f"Received start command from {message.from_user.id}")
-    await message.answer("Добро пожаловать! Введите позицию, на которую подаёте резюме:")
+    print("Prompting user for desired position")
+    await message.answer(
+        "Добро пожаловать! Введите позицию, на которую подаёте резюме:"
+    )
     await state.set_state(ResumeForm.position)
 
 
@@ -45,6 +56,7 @@ async def get_position(message: Message, state: FSMContext):
     print(f"Received position: {message.text}")
     await state.update_data(position=message.text)
     await message.answer("Введите ваше полное имя:")
+    print("Prompting user for full name")
     await state.set_state(ResumeForm.name)
 
 
@@ -53,6 +65,7 @@ async def get_name(message: Message, state: FSMContext):
     print(f"Received name: {message.text}")
     await state.update_data(name=message.text)
     await message.answer("Введите ваш email:")
+    print("Prompting user for email")
     await state.set_state(ResumeForm.email)
 
 
@@ -61,6 +74,7 @@ async def get_email(message: Message, state: FSMContext):
     print(f"Received email: {message.text}")
     await state.update_data(email=message.text)
     await message.answer("Введите номер телефона:")
+    print("Prompting user for phone number")
     await state.set_state(ResumeForm.phone)
 
 
@@ -69,6 +83,7 @@ async def get_phone(message: Message, state: FSMContext):
     print(f"Received phone number: {message.text}")
     await state.update_data(phone=message.text)
     await message.answer("Загрузите ваше резюме (PDF):")
+    print("Prompting user to upload resume PDF")
     await state.set_state(ResumeForm.resume)
 
 
@@ -86,12 +101,16 @@ async def get_resume(message: Message, state: FSMContext):
 
     await state.update_data(resume_path=resume_path)
     await message.answer("Загрузите CV (PDF):")
+    print("Prompting user to upload CV PDF")
     await state.set_state(ResumeForm.cv)
 
 
 @router.message(ResumeForm.cv)
 async def get_cv(message: Message, state: FSMContext):
     print("Received CV file")
+    print(
+        f"File name: {message.document.file_name}, size: {message.document.file_size}"
+    )
     if not message.document or message.document.mime_type != "application/pdf":
         await message.answer("Пожалуйста, загрузите именно PDF-файл.")
         return
@@ -106,6 +125,7 @@ async def get_cv(message: Message, state: FSMContext):
     print(f"CV saved to {cv_path}")
 
     await state.update_data(cv_path=cv_path)
+    print("Updated state with CV path, preparing to send emails")
     user_data = await state.get_data()
 
     await message.answer("Отправка писем... Пожалуйста, подождите.")
@@ -123,6 +143,7 @@ async def get_cv(message: Message, state: FSMContext):
 
 async def send_bulk_emails(data: dict, message: Message):
     print("Start sending bulk emails")
+    print(f"Total fields collected: {list(data.keys())}")
     sg = sendgrid.SendGridAPIClient(api_key=SENDGRID_APIKEY)
 
     html = f"""
@@ -144,7 +165,7 @@ async def send_bulk_emails(data: dict, message: Message):
             FileContent(encoded),
             FileName(name),
             FileType("application/pdf"),
-            Disposition("attachment")
+            Disposition("attachment"),
         )
 
     async with aiosqlite.connect("crewing_2.db") as db:
@@ -156,18 +177,29 @@ async def send_bulk_emails(data: dict, message: Message):
                         from_email=Email(EMAIL),
                         to_emails=To(to_email),
                         subject=f"Application for {data['position']} position",
-                        html_content=Content("text/html", html)
+                        html_content=Content("text/html", html),
                     )
-                    mail.add_attachment(create_attachment(data["resume_path"], "Resume.pdf"))
+                    mail.add_attachment(
+                        create_attachment(data["resume_path"], "Resume.pdf")
+                    )
                     mail.add_attachment(create_attachment(data["cv_path"], "CV.pdf"))
                     response = sg.send(mail)
 
+                    print(f"SendGrid response status: {response.status_code}")
+                    print(f"SendGrid response body: {response.body}")
+                    print(f"SendGrid response headers: {response.headers}")
+
                     if response.status_code == 202:
                         print(f"Email sent to: {to_email}")
+                        print("Waiting for next email...")
                         await message.answer(f"Письмо отправлено: {to_email}")
                     else:
-                        print(f"Error sending email to {to_email}: {response.status_code}")
-                        await message.answer(f"Ошибка при отправке на {to_email}: {response.status_code}")
+                        print(
+                            f"Error sending email to {to_email}: {response.status_code}"
+                        )
+                        await message.answer(
+                            f"Ошибка при отправке на {to_email}: {response.status_code}"
+                        )
                 except Exception as e:
                     print(f"Error for {to_email}: {str(e)}")
                     await message.answer(f"Ошибка для {to_email}: {str(e)}")
@@ -179,6 +211,7 @@ if __name__ == "__main__":
 
     async def main():
         print("Bot is starting...")
+        print("Polling initiated")
         await dp.start_polling(bot)
 
     asyncio.run(main())
